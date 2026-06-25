@@ -1,3 +1,5 @@
+import glob
+import platform
 import numpy as np
 
 from leap_hand_utils.dynamixel_client import *
@@ -35,16 +37,24 @@ class LeapNode:
         # For example ls /dev/serial/by-id/* to find your LEAP Hand. Then use the result.  
         # For example: /dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FT7W91VW-if00-port0
         self.motors = motors = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]
-        try:
-            self.dxl_client = DynamixelClient(motors, '/dev/ttyUSB0', 4000000)
-            self.dxl_client.connect()
-        except Exception:
+        # Build candidate port list based on OS to avoid slow timeouts on non-existent ports
+        if platform.system() == 'Darwin':
+            candidate_ports = sorted(glob.glob('/dev/tty.usbserial-*') + glob.glob('/dev/tty.usbmodem*'))
+        elif platform.system() == 'Windows':
+            candidate_ports = ['COM' + str(i) for i in range(1, 20)]
+        else:
+            candidate_ports = ['/dev/ttyUSB' + str(i) for i in range(4)]
+        self.dxl_client = None
+        for port in candidate_ports:
             try:
-                self.dxl_client = DynamixelClient(motors, '/dev/ttyUSB1', 4000000)
-                self.dxl_client.connect()
+                client = DynamixelClient(motors, port, 4000000)
+                client.connect()
+                self.dxl_client = client
+                break
             except Exception:
-                self.dxl_client = DynamixelClient(motors, 'COM13', 4000000)
-                self.dxl_client.connect()
+                continue
+        if self.dxl_client is None:
+            raise RuntimeError('Could not connect to LEAP Hand on any port: ' + str(candidate_ports))
         #Enables position-current control mode and the default parameters, it commands a position and then caps the current so the motors don't overload
         self.dxl_client.sync_write(motors, np.ones(len(motors))*5, 11, 1)
         self.dxl_client.set_torque_enabled(motors, True)
@@ -96,7 +106,7 @@ def main(**kwargs):
         #Set to an open pose and read the joint angles 33hz
         leap_hand.set_allegro(np.zeros(16))
         print("Position: " + str(leap_hand.read_pos()))
-        time.sleep(0.03)
+        time.sleep(0.05)
 
 if __name__ == "__main__":
     main()
